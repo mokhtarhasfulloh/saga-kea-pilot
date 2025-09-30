@@ -196,7 +196,7 @@ export default function DnsQueryTestTab() {
               value={queryName}
               onChange={(e) => setQueryName(e.target.value)}
               placeholder="example.com"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border-2 border-gray-400 bg-white text-gray-900 placeholder-gray-500 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:placeholder-gray-400"
               onKeyPress={(e) => e.key === 'Enter' && performDnsQuery()}
             />
           </div>
@@ -207,7 +207,7 @@ export default function DnsQueryTestTab() {
             <select
               value={queryType}
               onChange={(e) => setQueryType(e.target.value as DnsRecordTypeT)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border-2 border-gray-400 bg-white text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white dark:border-gray-600"
             >
               {DNS_QUERY_TYPES.map(type => (
                 <option key={type} value={type}>{type}</option>
@@ -222,7 +222,7 @@ export default function DnsQueryTestTab() {
               <select
                 value={dnsServer}
                 onChange={(e) => setDnsServer(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-400 bg-white text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white dark:border-gray-600"
               >
                 {COMMON_DNS_SERVERS.map(server => (
                   <option key={server.address} value={server.address}>
@@ -236,7 +236,7 @@ export default function DnsQueryTestTab() {
                 value={customServer}
                 onChange={(e) => setCustomServer(e.target.value)}
                 placeholder="8.8.8.8"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border-2 border-gray-400 bg-white text-gray-900 placeholder-gray-500 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:placeholder-gray-400"
               />
             )}
             <label className="flex items-center mt-1">
