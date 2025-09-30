@@ -34,6 +34,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Installation options
@@ -355,6 +356,7 @@ configure_kea_services() {
         "valid-lifetime": 3600,
         "subnet4": [
             {
+                "id": 1,
                 "subnet": "192.168.1.0/24",
                 "pools": [ { "pool": "192.168.1.100 - 192.168.1.200" } ],
                 "option-data": [
@@ -1052,6 +1054,13 @@ KEA_CA_PASSWORD=admin
 # DNS Configuration
 DNS_HOST=localhost
 DNS_PORT=53
+DNS_SERVER=127.0.0.1
+DNS_TSIG_KEY_NAME=sagaos-key
+DNS_TSIG_SECRET=$(openssl rand -base64 32)
+
+# DDNS Configuration
+DDNS_FORWARD_ZONE=example.com
+DDNS_REVERSE_ZONE=1.168.192.in-addr.arpa
 
 # Security
 JWT_SECRET=$(openssl rand -hex 32)
@@ -1280,30 +1289,40 @@ display_installation_summary() {
     fi
 
     # Access information
+    local server_ip=$(hostname -I | awk '{print $1}')
     echo "🌐 ACCESS INFORMATION:"
-    echo "   📱 Frontend: http://localhost:5173"
-    echo "   🔌 API Gateway: http://localhost:3001"
+    echo "   📱 Frontend: http://$server_ip"
+    echo "   🔌 API Gateway: http://$server_ip:3001"
     echo "   🗄️  Database: localhost:5432 (user: admin, db: kea)"
-    echo "   🌐 Kea Control: http://localhost:8000"
+    echo "   🌐 Kea Control: http://$server_ip:8000"
     echo ""
 
     # Service management
     echo "🔧 SERVICE MANAGEMENT:"
-    echo "   📊 Check status: sudo ./scripts/check-services.sh"
-    echo "   🔄 Restart all: sudo systemctl restart sagaos-*"
+    echo "   📊 Check status: sudo systemctl status sagaos-api isc-kea-dhcp4-server isc-kea-ctrl-agent"
+    echo "   🔄 Restart all: sudo systemctl restart sagaos-api isc-kea-dhcp4-server isc-kea-ctrl-agent"
     echo "   📋 View logs: sudo journalctl -u sagaos-api -f"
     echo ""
 
     # Next steps
     echo "🚀 NEXT STEPS:"
-    echo "   1. 🔍 Verify all services: sudo ./scripts/check-services.sh"
-    echo "   2. 🌐 Open http://localhost:5173 in your browser"
-    echo "   3. 🔑 Login with admin/admin (change password immediately)"
-    echo "   4. 📖 Read documentation: ./README.md"
+    echo "   1. 🌐 Open http://$server_ip in your browser"
+    echo "   2. 🔑 Login with admin/admin (change password immediately)"
+    echo "   3. 📖 Read documentation: $INSTALL_DIR/README.md"
     echo ""
 
     if [ $INSTALLATION_ERRORS -eq 0 ]; then
         echo "🎊 CONGRATULATIONS! SagaOS is ready to use!"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo -e "${GREEN}${BOLD}🌐 READY TO GO! Open your browser and visit:${NC}"
+        echo ""
+        echo -e "   ${YELLOW}${BOLD}http://$server_ip${NC}"
+        echo ""
+        echo -e "${CYAN}   Login with: ${YELLOW}admin / admin${NC}"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     else
         echo "⚠️  Installation completed but please review any errors above"
     fi
@@ -1345,13 +1364,14 @@ display_summary() {
     echo -e "${GREEN}🎉 SagaOS Kea Pilot Installation Complete!${NC}"
     echo -e "${BLUE}============================================${NC}"
     echo ""
+    local server_ip=$(hostname -I | awk '{print $1}')
     echo -e "${CYAN}📋 Installation Summary:${NC}"
     echo -e "  📁 Installation Directory: ${YELLOW}$INSTALL_DIR${NC}"
     echo -e "  👤 Service User: ${YELLOW}$SERVICE_USER${NC}"
     echo -e "  🗄️  Database: ${YELLOW}PostgreSQL (admin/admin)${NC}"
-    echo -e "  🌐 Frontend: ${YELLOW}http://$(hostname -I | awk '{print $1}'):5173${NC}"
-    echo -e "  🔧 API Gateway: ${YELLOW}http://$(hostname -I | awk '{print $1}'):3001${NC}"
-    echo -e "  📊 Health Check: ${YELLOW}http://$(hostname -I | awk '{print $1}'):3001/api/health${NC}"
+    echo -e "  🌐 Frontend: ${YELLOW}http://$server_ip${NC}"
+    echo -e "  🔧 API Gateway: ${YELLOW}http://$server_ip:3001${NC}"
+    echo -e "  📊 Health Check: ${YELLOW}http://$server_ip:3001/api/health${NC}"
     echo -e "  🔐 Login Credentials: ${YELLOW}admin/admin${NC}"
     echo ""
     echo -e "${CYAN}🔧 Service Status:${NC}"
