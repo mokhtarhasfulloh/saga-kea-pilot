@@ -253,7 +253,7 @@ export default function DdnsTab() {
               <h5 className="font-medium mb-2">Allowed Zones</h5>
               <div className="space-y-1">
                 {config.allowedZones.map(zone => (
-                  <div key={zone} className="px-3 py-2 bg-gray-50 rounded text-sm font-mono">
+                  <div key={zone} className="px-3 py-2 bg-muted text-foreground rounded text-sm font-mono">
                     {zone}
                   </div>
                 ))}
@@ -265,10 +265,10 @@ export default function DdnsTab() {
               <h5 className="font-medium mb-2">Update Policies</h5>
               <div className="space-y-2">
                 {config.updatePolicies.map((policy, index) => (
-                  <div key={index} className="px-3 py-2 bg-gray-50 rounded">
-                    <div className="text-sm font-mono">{policy.zone}</div>
-                    <div className="text-xs text-gray-600">{policy.policy}</div>
-                    <div className="text-xs text-blue-600">Key: {policy.keyName}</div>
+                  <div key={index} className="px-3 py-2 bg-muted rounded">
+                    <div className="text-sm font-mono text-foreground">{policy.zone}</div>
+                    <div className="text-xs text-muted-foreground">{policy.policy}</div>
+                    <div className="text-xs text-primary">Key: {policy.keyName}</div>
                   </div>
                 ))}
               </div>
