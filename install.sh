@@ -662,6 +662,14 @@ install_dependencies() {
                 exit 1
             fi
 
+            # Upgrade existing packages to latest versions
+            log "INFO" "Upgrading system packages to latest versions..."
+            if ! apt upgrade -y >/dev/null 2>&1; then
+                log "WARN" "Some packages failed to upgrade, continuing installation..."
+            else
+                log "SUCCESS" "System packages upgraded successfully"
+            fi
+
             # Install essential packages with error handling
             log "INFO" "Installing essential packages..."
             local essential_packages=(
