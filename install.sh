@@ -298,6 +298,9 @@ install_kea_packages() {
 
             if [ $installed_packages -gt 0 ]; then
                 log "SUCCESS" "Kea DHCP packages installed ($installed_packages packages)"
+
+                # Configure Kea after successful installation
+                configure_kea_services
                 return 0
             else
                 log "ERROR" "Failed to install any Kea DHCP packages"
@@ -310,6 +313,119 @@ install_kea_packages() {
             return 1
             ;;
     esac
+}
+
+# Configure Kea services with proper configuration files
+configure_kea_services() {
+    log "INFO" "Configuring Kea DHCP services..."
+
+    # Create Kea directories
+    mkdir -p /etc/kea /var/lib/kea /var/log/kea
+    chown -R root:root /etc/kea
+
+    # Create basic DHCP4 configuration if it doesn't exist
+    if [ ! -f "/etc/kea/kea-dhcp4.conf" ]; then
+        log "INFO" "Creating basic Kea DHCP4 configuration..."
+        cat > /etc/kea/kea-dhcp4.conf << 'EOF'
+{
+    "Dhcp4": {
+        "interfaces-config": {
+            "interfaces": ["*"]
+        },
+        "control-socket": {
+            "socket-type": "unix",
+            "socket-name": "/tmp/kea4-ctrl-socket"
+        },
+        "lease-database": {
+            "type": "memfile",
+            "lfc-interval": 3600
+        },
+        "expired-leases-processing": {
+            "reclaim-timer-wait-time": 10,
+            "flush-reclaimed-timer-wait-time": 25,
+            "hold-reclaimed-time": 3600,
+            "max-reclaim-leases": 100,
+            "max-reclaim-time": 250,
+            "unwarned-reclaim-cycles": 5
+        },
+        "renew-timer": 900,
+        "rebind-timer": 1800,
+        "valid-lifetime": 3600,
+        "subnet4": [
+            {
+                "subnet": "192.168.1.0/24",
+                "pools": [ { "pool": "192.168.1.100 - 192.168.1.200" } ],
+                "option-data": [
+                    {
+                        "name": "routers",
+                        "data": "192.168.1.1"
+                    },
+                    {
+                        "name": "domain-name-servers",
+                        "data": "8.8.8.8, 8.8.4.4"
+                    }
+                ]
+            }
+        ],
+        "loggers": [
+            {
+                "name": "kea-dhcp4",
+                "output_options": [
+                    {
+                        "output": "/var/log/kea/kea-dhcp4.log"
+                    }
+                ],
+                "severity": "INFO",
+                "debuglevel": 0
+            }
+        ]
+    }
+}
+EOF
+        log "SUCCESS" "Created basic DHCP4 configuration"
+    fi
+
+    # Create Control Agent configuration if it doesn't exist
+    if [ ! -f "/etc/kea/kea-ctrl-agent.conf" ]; then
+        log "INFO" "Creating Kea Control Agent configuration..."
+        cat > /etc/kea/kea-ctrl-agent.conf << 'EOF'
+{
+    "Control-agent": {
+        "http-host": "127.0.0.1",
+        "http-port": 8000,
+        "control-sockets": {
+            "dhcp4": {
+                "socket-type": "unix",
+                "socket-name": "/tmp/kea4-ctrl-socket"
+            }
+        },
+        "loggers": [
+            {
+                "name": "kea-ctrl-agent",
+                "output_options": [
+                    {
+                        "output": "/var/log/kea/kea-ctrl-agent.log"
+                    }
+                ],
+                "severity": "INFO",
+                "debuglevel": 0
+            }
+        ]
+    }
+}
+EOF
+        log "SUCCESS" "Created Control Agent configuration"
+    fi
+
+    # Set proper permissions
+    chown -R root:root /etc/kea
+    chmod 644 /etc/kea/*.conf
+
+    # Create log directory with proper permissions
+    mkdir -p /var/log/kea
+    chown -R _kea:_kea /var/log/kea 2>/dev/null || chown -R root:root /var/log/kea
+
+    log "SUCCESS" "Kea configuration completed"
 }
 
 # Enhanced service management functions
@@ -626,28 +742,58 @@ setup_install_directory() {
 
 # Function to download and extract SagaOS
 download_sagaos() {
-    log "INFO" "Downloading SagaOS Kea Pilot..."
-    
+    log "INFO" "Setting up SagaOS Kea Pilot..."
+
+    # Check if we're running from the source directory
+    if [ -f "package.json" ] && [ -f "README.md" ]; then
+        log "INFO" "Running from source directory, copying files..."
+
+        # Copy all application files except git and node_modules
+        rsync -av --exclude='.git' --exclude='node_modules' --exclude='dist' . "$INSTALL_DIR/"
+
+        # Set ownership
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+
+        log "SUCCESS" "SagaOS files copied from source directory"
+        return 0
+    fi
+
+    # If not in source directory, try to download from GitHub
+    log "INFO" "Downloading SagaOS from GitHub..."
     local temp_dir=$(mktemp -d)
-    local download_url="https://github.com/saga-fiber/sagaos-kea-pilot/archive/main.zip"
-    
+    local download_url="https://github.com/BlaineHolmes/saga-kea-pilot/archive/main.zip"
+
     # Download the latest release
     cd "$temp_dir"
-    wget -O sagaos.zip "$download_url"
-    
-    # Extract
-    unzip -q sagaos.zip
-    
-    # Copy to installation directory
-    cp -r sagaos-kea-pilot-main/* "$INSTALL_DIR/"
-    
-    # Set ownership
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    
-    # Cleanup
-    rm -rf "$temp_dir"
-    
-    log "INFO" "SagaOS downloaded and extracted to $INSTALL_DIR"
+    if wget -O sagaos.zip "$download_url" >/dev/null 2>&1; then
+        # Extract
+        if unzip -q sagaos.zip; then
+            # Copy to installation directory
+            cp -r saga-kea-pilot-main/* "$INSTALL_DIR/" 2>/dev/null || {
+                log "ERROR" "Failed to extract downloaded files"
+                rm -rf "$temp_dir"
+                return 1
+            }
+
+            # Set ownership
+            chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+
+            # Cleanup
+            rm -rf "$temp_dir"
+
+            log "SUCCESS" "SagaOS downloaded and extracted to $INSTALL_DIR"
+            return 0
+        else
+            log "ERROR" "Failed to extract downloaded archive"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    else
+        log "ERROR" "Failed to download SagaOS from GitHub"
+        log "INFO" "Please ensure you're running from the SagaOS source directory"
+        rm -rf "$temp_dir"
+        return 1
+    fi
 }
 
 # Function to install Node.js dependencies
@@ -734,7 +880,10 @@ install_systemd_services() {
     fi
     
     log "INFO" "Installing systemd services..."
-    
+
+    # Create environment file
+    create_environment_file
+
     # Create SagaOS API service
     cat > /etc/systemd/system/sagaos-api.service << EOF
 [Unit]
@@ -762,6 +911,48 @@ EOF
     systemctl enable sagaos-api
     
     log "INFO" "Systemd services installed"
+}
+
+# Function to create environment file
+create_environment_file() {
+    log "INFO" "Creating environment configuration..."
+
+    cat > "$INSTALL_DIR/.env" << EOF
+# SagaOS Kea Pilot Configuration
+NODE_ENV=production
+PORT=3001
+
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=kea
+DB_USER=admin
+DB_PASSWORD=admin
+
+# Kea Configuration
+KEA_CA_HOST=localhost
+KEA_CA_PORT=8000
+KEA_CA_USER=admin
+KEA_CA_PASSWORD=admin
+
+# DNS Configuration
+DNS_HOST=localhost
+DNS_PORT=53
+
+# Security
+JWT_SECRET=$(openssl rand -hex 32)
+SESSION_SECRET=$(openssl rand -hex 32)
+
+# Logging
+LOG_LEVEL=info
+LOG_FILE=/var/log/sagaos/api.log
+EOF
+
+    # Set proper permissions
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
+
+    log "SUCCESS" "Environment file created"
 }
 
 # Function to configure firewall
