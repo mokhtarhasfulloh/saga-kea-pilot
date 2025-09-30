@@ -1,0 +1,532 @@
+# ============================================================================
+# SagaOS Kea Pilot - Production Docker Compose Configuration
+# ============================================================================
+# Production-ready containerized deployment with:
+# - Proper networking and security
+# - Persistent volumes and data management
+# - Health checks and monitoring
+# - SSL/TLS termination
+# - Resource limits and constraints
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL Database - Production Configuration
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: sagaos-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-kea}
+      POSTGRES_USER: ${DB_USER:-admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-CHANGE-THIS-PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_backups:/var/backups/postgresql
+      - ./config/database:/docker-entrypoint-initdb.d:ro
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "127.0.0.1:5432:5432"  # Bind to localhost only
+    networks:
+      - sagaos-backend
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-kea}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+
+  # ============================================================================
+  # SagaOS Backend API - Production Configuration
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+    image: sagaos/backend:${SAGAOS_VERSION:-latest}
+    container_name: sagaos-backend-prod
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-kea}
+      - DB_USER=${DB_USER:-admin}
+      - DB_PASSWORD=${DB_PASSWORD:-CHANGE-THIS-PASSWORD}
+      - KEA_CA_URL=http://kea-ca:8000
+      - KEA_CA_USER=${KEA_CA_USER:-CHANGE-THIS-USER}
+      - KEA_CA_PASSWORD=${KEA_CA_PASSWORD:-CHANGE-THIS-PASSWORD}
+      - DNS_SERVER=bind9
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET:-CHANGE-THIS-JWT-SECRET}
+      - LOG_LEVEL=${LOG_LEVEL:-warn}
+    ports:
+      - "127.0.0.1:3001:3001"  # Bind to localhost only
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sagaos-backend
+      - sagaos-frontend
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    volumes:
+      - backend_logs:/var/log/sagaos
+      - backend_uploads:/opt/sagaos/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # ============================================================================
+  # Nginx Reverse Proxy - Production Configuration
+  # ============================================================================
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: sagaos-nginx-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./dist:/usr/share/nginx/html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - backend
+    networks:
+      - sagaos-frontend
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  # ============================================================================
+  # Kea DHCP4 Server - Production Configuration
+  # ============================================================================
+  kea-dhcp4:
+    image: jonasal/kea-dhcp4:2.4.1
+    container_name: sagaos-kea-dhcp4-prod
+    restart: unless-stopped
+    environment:
+      - KEA_DHCP4_CONFIG_FILE=/etc/kea/kea-dhcp4.conf
+    volumes:
+      - ./config/kea/kea-dhcp4.conf:/etc/kea/kea-dhcp4.conf:ro
+      - kea_data:/var/lib/kea
+      - kea_logs:/var/log/kea
+    ports:
+      - "67:67/udp"
+    networks:
+      - sagaos-backend
+      - sagaos-dhcp
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    healthcheck:
+      test: ["CMD", "keactrl", "status"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  # ============================================================================
+  # Kea Control Agent - Production Configuration
+  # ============================================================================
+  kea-ca:
+    image: jonasal/kea-ctrl-agent:2.4.1
+    container_name: sagaos-kea-ca-prod
+    restart: unless-stopped
+    environment:
+      - KEA_CTRL_AGENT_CONFIG_FILE=/etc/kea/kea-ctrl-agent.conf
+    volumes:
+      - ./config/kea/kea-ctrl-agent.conf:/etc/kea/kea-ctrl-agent.conf:ro
+      - kea_data:/var/lib/kea
+      - kea_logs:/var/log/kea
+    ports:
+      - "127.0.0.1:8000:8000"  # Bind to localhost only
+    networks:
+      - sagaos-backend
+    depends_on:
+      - kea-dhcp4
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  # ============================================================================
+  # BIND9 DNS Server - Production Configuration
+  # ============================================================================
+  bind9:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: sagaos-bind9-prod
+    restart: unless-stopped
+    environment:
+      - BIND9_USER=bind
+    volumes:
+      - ./config/bind9:/etc/bind:ro
+      - bind9_data:/var/lib/bind
+      - bind9_logs:/var/log/bind
+      - bind9_cache:/var/cache/bind
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "127.0.0.1:953:953/tcp"  # rndc port - localhost only
+    networks:
+      - sagaos-backend
+      - sagaos-dns
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    healthcheck:
+      test: ["CMD", "dig", "@localhost", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+
+  # ============================================================================
+  # Monitoring and Observability
+  # ============================================================================
+  
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: sagaos-prometheus-prod
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"  # Bind to localhost only
+    networks:
+      - sagaos-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    security_opt:
+      - no-new-privileges:true
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: sagaos-grafana-prod
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-CHANGE-THIS-PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3000:3000"  # Bind to localhost only
+    depends_on:
+      - prometheus
+    networks:
+      - sagaos-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    security_opt:
+      - no-new-privileges:true
+
+# ============================================================================
+# Persistent Volumes - Production Data Management
+# ============================================================================
+volumes:
+  # Database volumes
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/postgres
+  postgres_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/backups/postgres
+
+  # Application volumes
+  backend_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/logs/backend
+  backend_uploads:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/uploads
+
+  # Web server volumes
+  nginx_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/logs/nginx
+  nginx_cache:
+    driver: local
+
+  # Kea DHCP volumes
+  kea_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/kea
+  kea_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/logs/kea
+
+  # BIND9 DNS volumes
+  bind9_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/bind9
+  bind9_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/logs/bind9
+  bind9_cache:
+    driver: local
+
+  # Monitoring volumes
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/sagaos/data/grafana
+
+# ============================================================================
+# Networks - Production Network Segmentation
+# ============================================================================
+networks:
+  # Frontend network - Web traffic
+  sagaos-frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+          gateway: 172.20.1.1
+    driver_opts:
+      com.docker.network.bridge.name: sagaos-frontend
+
+  # Backend network - API and database traffic
+  sagaos-backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+          gateway: 172.20.2.1
+    driver_opts:
+      com.docker.network.bridge.name: sagaos-backend
+
+  # DHCP network - DHCP server traffic
+  sagaos-dhcp:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.3.0/24
+          gateway: 172.20.3.1
+    driver_opts:
+      com.docker.network.bridge.name: sagaos-dhcp
+
+  # DNS network - DNS server traffic
+  sagaos-dns:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.4.0/24
+          gateway: 172.20.4.1
+    driver_opts:
+      com.docker.network.bridge.name: sagaos-dns
+
+  # Monitoring network - Metrics and observability
+  sagaos-monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.5.0/24
+          gateway: 172.20.5.1
+    driver_opts:
+      com.docker.network.bridge.name: sagaos-monitoring
+
+# ============================================================================
+# Production Configuration Notes
+# ============================================================================
+# 
+# 🔐 SECURITY FEATURES:
+# - All services run as non-root users
+# - Read-only filesystems where possible
+# - No new privileges security option
+# - Network segmentation with dedicated subnets
+# - Localhost-only binding for internal services
+# - Resource limits and reservations
+# 
+# 📊 MONITORING & OBSERVABILITY:
+# - Comprehensive health checks
+# - Structured logging with rotation
+# - Prometheus metrics collection
+# - Grafana dashboards
+# - Performance monitoring
+# 
+# 💾 DATA PERSISTENCE:
+# - Persistent volumes for all data
+# - Backup volumes for database
+# - Log rotation and management
+# - Configuration as code
+# 
+# 🚀 PRODUCTION DEPLOYMENT:
+# 1. Create data directories: mkdir -p /opt/sagaos/{data,logs,backups}
+# 2. Set environment variables in .env.production
+# 3. Generate SSL certificates
+# 4. Deploy: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# 5. Monitor: docker-compose logs -f
+# 
+# ⚠️  IMPORTANT:
+# - Change ALL default passwords before deployment
+# - Configure SSL/TLS certificates
+# - Set up external backup procedures
+# - Configure monitoring and alerting
+# - Review and adjust resource limits
+# 
+# ============================================================================

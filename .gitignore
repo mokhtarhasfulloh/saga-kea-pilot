@@ -1,0 +1,275 @@
+# ============================================================================
+# SagaOS Kea Pilot - Comprehensive .gitignore
+# ============================================================================
+
+# ============================================================================
+# Environment & Secrets (CRITICAL - Never commit these!)
+# ============================================================================
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Secrets and keys
+secrets/
+keys/
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+
+# Database credentials and connection strings
+database.url
+db.conf
+pg_service.conf
+
+# TSIG keys and DNS secrets
+*.tsig
+rndc.key
+named.conf.local.generated
+
+# JWT secrets and session keys
+jwt.secret
+session.key
+
+# ============================================================================
+# Build Artifacts & Dependencies
+# ============================================================================
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+out/
+rendered/
+generated/
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ============================================================================
+# Runtime Data & Logs
+# ============================================================================
+
+# Application logs
+logs/
+*.log
+*.log.*
+
+# Runtime data
+data/
+runtime/
+tmp/
+temp/
+cache/
+.cache/
+
+# Process IDs
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage and test reports
+coverage/
+.nyc_output/
+.coverage/
+junit.xml
+test-results/
+
+# ============================================================================
+# Database & Service Data
+# ============================================================================
+
+# PostgreSQL
+*.sql.backup
+*.dump
+*.backup
+pg_data/
+postgres_data/
+
+# Kea DHCP data
+kea_data/
+lease_data/
+*.leases
+*.leases.*
+
+# BIND9 data
+bind_data/
+zone_data/
+*.zone.backup
+*.zone.signed
+*.zone.jnl
+
+# ============================================================================
+# Development & Editor Files
+# ============================================================================
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.tmp
+
+# ============================================================================
+# Docker & Container Data
+# ============================================================================
+
+# Docker volumes and data
+docker-data/
+volumes/
+.docker/
+
+# Docker Compose override files
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ============================================================================
+# Backup & Archive Files
+# ============================================================================
+
+# Backup files
+*.backup
+*.bak
+*.old
+*.orig
+*.save
+*.swp
+
+# Archive files
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+
+# ============================================================================
+# Local Development Files
+# ============================================================================
+
+# Local configuration overrides
+*.local
+*.dev
+*.development
+config.local.*
+settings.local.*
+
+# Development databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Local SSL certificates
+localhost.crt
+localhost.key
+dev.crt
+dev.key
+
+# ============================================================================
+# Monitoring & Analytics
+# ============================================================================
+
+# Monitoring data
+metrics/
+monitoring/
+grafana_data/
+prometheus_data/
+
+# Analytics and tracking
+analytics/
+tracking/
+*.analytics
+
+# ============================================================================
+# Documentation Build Artifacts
+# ============================================================================
+
+# Generated documentation
+docs/build/
+docs/dist/
+.docusaurus/
+
+# ============================================================================
+# Package Manager Files
+# ============================================================================
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# NPM
+.npmrc.local
+package-lock.json.backup
+
+# ============================================================================
+# Miscellaneous
+# ============================================================================
+
+# Temporary files
+.tmp/
+.temp/
+
+# Lock files (keep package-lock.json but ignore others)
+yarn.lock.backup
+pnpm-lock.yaml.backup
+
+# IDE and editor specific
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+
+# ============================================================================
+# Production Deployment Files (Keep examples, ignore actual)
+# ============================================================================
+
+# Deployment configurations
+deploy.conf
+production.conf
+staging.conf
+!*.conf.example
+
+# Service files
+*.service.generated
+systemd/*.service.generated
+
+# ============================================================================
+# End of .gitignore
+# ============================================================================

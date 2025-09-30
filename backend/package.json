@@ -1,0 +1,19 @@
+{
+  "name": "sagaos-api-gateway",
+  "version": "1.0.0",
+  "description": "SagaOS API Gateway for Kea DHCP integration",
+  "main": "api-gateway.js",
+  "scripts": {
+    "start": "node api-gateway.js",
+    "dev": "node api-gateway.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "http-proxy-middleware": "^2.0.6",
+    "ws": "^8.14.2"
+  },
+  "keywords": ["sagaos", "kea", "dhcp", "api-gateway"],
+  "author": "SagaOS",
+  "license": "MIT"
+}
