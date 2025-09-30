@@ -846,8 +846,21 @@ install_node_dependencies() {
 
     # Build frontend
     if [ -f "package.json" ]; then
-        sudo -u "$SERVICE_USER" npm run build
-        log "INFO" "Frontend built successfully"
+        log "INFO" "Building frontend application..."
+        if sudo -u "$SERVICE_USER" npm run build; then
+            log "SUCCESS" "Frontend built successfully"
+
+            # Verify dist folder was created
+            if [ -d "$INSTALL_DIR/dist" ] && [ -f "$INSTALL_DIR/dist/index.html" ]; then
+                log "SUCCESS" "Frontend dist folder verified (index.html found)"
+            else
+                log "ERROR" "Frontend build completed but dist folder is missing or incomplete"
+                log "ERROR" "Nginx will not be able to serve the application"
+            fi
+        else
+            log "ERROR" "Frontend build failed"
+            log "ERROR" "Check build logs for details"
+        fi
     fi
 
     # Clean up devDependencies after build to save space
@@ -1092,15 +1105,24 @@ EOF
     if [ -d "/etc/nginx/sites-enabled" ]; then
         rm -f /etc/nginx/sites-enabled/default
         ln -sf /etc/nginx/sites-available/sagaos /etc/nginx/sites-enabled/sagaos
+        log "INFO" "Nginx site enabled (sites-enabled)"
     else
         # For systems without sites-enabled (like CentOS)
         rm -f /etc/nginx/conf.d/default.conf
         ln -sf /etc/nginx/sites-available/sagaos /etc/nginx/conf.d/sagaos.conf
+        log "INFO" "Nginx site enabled (conf.d)"
     fi
 
     # Test Nginx configuration
     if nginx -t >/dev/null 2>&1; then
         log "SUCCESS" "Nginx configuration valid"
+
+        # Restart Nginx to apply new configuration
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            log "INFO" "Restarting Nginx to apply configuration..."
+            systemctl restart nginx
+            log "SUCCESS" "Nginx restarted with SagaOS configuration"
+        fi
     else
         log "WARN" "Nginx configuration test failed - check manually"
     fi
