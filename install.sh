@@ -275,8 +275,8 @@ install_kea_packages() {
 
     case "$PACKAGE_MANAGER" in
         apt)
-            # Try official ISC package names first
-            local kea_packages=("isc-kea-dhcp4-server" "isc-kea-ctrl-agent" "isc-kea-admin" "isc-kea-common")
+            # Try official ISC package names first (including DDNS)
+            local kea_packages=("isc-kea-dhcp4-server" "isc-kea-ctrl-agent" "isc-kea-dhcp-ddns-server" "isc-kea-admin" "isc-kea-common")
             local installed_packages=0
 
             for package in "${kea_packages[@]}"; do
@@ -918,6 +918,81 @@ configure_services() {
     log "INFO" "Service configuration completed"
 }
 
+# Function to configure BIND9 and DDNS
+configure_bind9_ddns() {
+    log "INFO" "Configuring BIND9 and DDNS..."
+
+    # Create BIND9 keys directory
+    mkdir -p /etc/bind/keys
+    chown root:bind /etc/bind/keys
+    chmod 755 /etc/bind/keys
+
+    # Generate TSIG key for DDNS if it doesn't exist
+    if [ ! -f /etc/bind/keys/sagaos-ddns-key.key ]; then
+        log "INFO" "Generating TSIG key for DDNS..."
+        tsig-keygen -a hmac-sha256 sagaos-ddns-key > /etc/bind/keys/sagaos-ddns-key.key
+        chown root:bind /etc/bind/keys/sagaos-ddns-key.key
+        chmod 640 /etc/bind/keys/sagaos-ddns-key.key
+    fi
+
+    # Generate rndc key if it doesn't exist
+    if [ ! -f /etc/bind/rndc.key ]; then
+        log "INFO" "Generating rndc key..."
+        rndc-confgen -a
+        chown root:bind /etc/bind/rndc.key
+        chmod 640 /etc/bind/rndc.key
+    fi
+
+    # Remove conflicting rndc.conf if it exists
+    if [ -f /etc/bind/rndc.conf ]; then
+        log "INFO" "Removing conflicting rndc.conf..."
+        rm -f /etc/bind/rndc.conf
+    fi
+
+    # Add sagaos user to bind group for rndc access
+    log "INFO" "Adding $SERVICE_USER to bind group..."
+    usermod -a -G bind "$SERVICE_USER" || true
+
+    # Create Kea DDNS configuration
+    log "INFO" "Creating Kea DDNS configuration..."
+    cat > /etc/kea/kea-dhcp-ddns.conf << 'EOF'
+{
+    "DhcpDdns": {
+        "ip-address": "127.0.0.1",
+        "port": 53001,
+        "control-socket": {
+            "socket-type": "unix",
+            "socket-name": "/var/run/kea/kea-ddns-ctrl-socket"
+        },
+        "tsig-keys": [],
+        "forward-ddns": {
+            "ddns-domains": []
+        },
+        "reverse-ddns": {
+            "ddns-domains": []
+        },
+        "loggers": [
+            {
+                "name": "kea-dhcp-ddns",
+                "output_options": [
+                    {
+                        "output": "/var/log/kea/kea-ddns.log"
+                    }
+                ],
+                "severity": "INFO",
+                "debuglevel": 0
+            }
+        ]
+    }
+}
+EOF
+
+    # Enable Kea DDNS service
+    systemctl enable isc-kea-dhcp-ddns-server || true
+
+    log "INFO" "BIND9 and DDNS configuration completed"
+}
+
 # Function to install systemd services
 install_systemd_services() {
     if [ "$SKIP_SERVICES" = true ]; then
@@ -1133,6 +1208,7 @@ start_services() {
     # Try different service names for Kea
     local kea_dhcp_services=("isc-kea-dhcp4-server" "kea-dhcp4-server")
     local kea_ca_services=("isc-kea-ctrl-agent" "kea-ctrl-agent")
+    local kea_ddns_services=("isc-kea-dhcp-ddns-server" "kea-dhcp-ddns-server")
 
     for service in "${kea_dhcp_services[@]}"; do
         if systemctl list-unit-files | grep -q "$service.service"; then
@@ -1143,6 +1219,14 @@ start_services() {
     done
 
     for service in "${kea_ca_services[@]}"; do
+        if systemctl list-unit-files | grep -q "$service.service"; then
+            systemctl enable "$service" >/dev/null 2>&1 || true
+            start_service_with_retry "$service" false
+            break
+        fi
+    done
+
+    for service in "${kea_ddns_services[@]}"; do
         if systemctl list-unit-files | grep -q "$service.service"; then
             systemctl enable "$service" >/dev/null 2>&1 || true
             start_service_with_retry "$service" false
@@ -1224,6 +1308,19 @@ verify_services() {
     done
     if [ "$kea_ca_running" = false ]; then
         echo "❌ Kea Control Agent: STOPPED"
+    fi
+
+    # Check Kea DDNS (try different service names)
+    local kea_ddns_running=false
+    for service in "isc-kea-dhcp-ddns-server" "kea-dhcp-ddns-server"; do
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            echo "✅ Kea DDNS ($service): RUNNING"
+            kea_ddns_running=true
+            break
+        fi
+    done
+    if [ "$kea_ddns_running" = false ]; then
+        echo "❌ Kea DDNS: STOPPED"
     fi
 
     # Check BIND9/Named
@@ -1502,6 +1599,7 @@ main() {
     install_node_dependencies
     setup_database
     configure_services
+    configure_bind9_ddns
     install_systemd_services
     configure_firewall
     start_services
