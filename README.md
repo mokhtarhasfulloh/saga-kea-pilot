@@ -199,11 +199,15 @@ cd saga-kea-pilot && sudo docker-compose up -d
 ### 🌐 **Access Your Installation**
 
 After installation, access the web interface:
-- **Frontend**: http://localhost:5173
 - **API Gateway**: http://localhost:3001
 - **Health Check**: http://localhost:3001/api/health
+- **Kea Control Agent**: http://localhost:8000
 
 **Default Login**: `admin` / `admin` ⚠️ **Change for production!**
+
+> **Note**: The installation script sets up the backend services (Kea DHCP, PostgreSQL, API Gateway). For the web frontend, you can either:
+> - Run in development mode: `npm run dev` (serves on port 5173)
+> - Build and serve with Nginx: `npm run build` then configure Nginx to serve the `dist/` folder on port 80
 
 ### 📋 **Prerequisites**
 - **OS**: Ubuntu 20.04+, CentOS 8+, RHEL 8+, Debian 11+
@@ -618,11 +622,62 @@ curl http://localhost:3001/api/dns/zones
 
 #### 🔧 **Post-Installation Steps**
 
-1. **Change Default Credentials** (Important!)
-2. **Configure Firewall Rules**
-3. **Setup SSL/TLS Certificates**
-4. **Configure Backup Strategy**
-5. **Review Security Settings**
+1. **Verify Services are Running**:
+   ```bash
+   # Check all service status
+   ./scripts/check-services.sh
+
+   # Or check individual services
+   sudo systemctl status sagaos-api
+   sudo systemctl status postgresql
+   sudo systemctl status isc-kea-dhcp4-server
+   ```
+
+2. **Change Default Credentials** (Important!)
+3. **Configure Firewall Rules**
+4. **Setup SSL/TLS Certificates**
+5. **Configure Backup Strategy**
+6. **Review Security Settings**
+
+#### 🛠️ **Service Management**
+
+**Check Service Status:**
+```bash
+# Quick status check
+./scripts/check-services.sh
+
+# Individual service status
+sudo systemctl status sagaos-api
+sudo systemctl status postgresql
+sudo systemctl status isc-kea-dhcp4-server
+```
+
+**Restart Services:**
+```bash
+# Restart all services
+sudo systemctl restart postgresql sagaos-api isc-kea-dhcp4-server nginx
+
+# Restart individual service
+sudo systemctl restart sagaos-api
+```
+
+**View Service Logs:**
+```bash
+# API Gateway logs
+sudo journalctl -u sagaos-api -f
+
+# PostgreSQL logs
+sudo journalctl -u postgresql -f
+
+# Kea DHCP logs
+sudo journalctl -u isc-kea-dhcp4-server -f
+```
+
+**Service Auto-Start:**
+All services are automatically enabled to start on boot. To disable:
+```bash
+sudo systemctl disable sagaos-api
+```
 
 ### Environment Configuration
 

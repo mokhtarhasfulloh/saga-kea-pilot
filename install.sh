@@ -6,7 +6,7 @@
 # One-command installation for the complete SagaOS system
 # Supports Ubuntu 20.04+, CentOS 8+, RHEL 8+
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/saga-fiber/sagaos-kea-pilot/main/install.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/BlaineHolmes/saga-kea-pilot/main/install.sh | sudo bash
 # Or:    sudo ./install.sh
 # ============================================================================
 
@@ -639,7 +639,7 @@ install_dependencies() {
             local essential_packages=(
                 "curl" "wget" "git" "unzip" "software-properties-common"
                 "apt-transport-https" "ca-certificates" "gnupg" "lsb-release"
-                "jq" "openssl" "ufw"
+                "jq" "openssl" "ufw" "rsync" "net-tools"
             )
 
             for package in "${essential_packages[@]}"; do
@@ -822,18 +822,32 @@ setup_database() {
     # Initialize PostgreSQL if needed
     if [ "$PACKAGE_MANAGER" = "yum" ]; then
         /usr/pgsql-16/bin/postgresql-16-setup initdb
+        # Start and enable PostgreSQL on RHEL/CentOS
+        systemctl enable postgresql-16 >/dev/null 2>&1
+        systemctl start postgresql-16
+    else
+        # Start and enable PostgreSQL on Debian/Ubuntu
+        systemctl enable postgresql >/dev/null 2>&1
+        systemctl start postgresql
     fi
-    
-    # Start and enable PostgreSQL
-    systemctl start postgresql
-    systemctl enable postgresql
-    
-    # Create database and user
-    sudo -u postgres psql << EOF
-CREATE USER admin WITH PASSWORD 'admin';
-CREATE DATABASE kea OWNER admin;
+
+    # Create database and user (idempotent - safe to re-run)
+    sudo -u postgres psql << 'EOF'
+DO $$
+BEGIN
+   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'admin') THEN
+      CREATE ROLE admin LOGIN PASSWORD 'admin';
+   END IF;
+END$$;
+
+DO $$
+BEGIN
+   IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kea') THEN
+      CREATE DATABASE kea OWNER admin;
+   END IF;
+END$$;
+
 GRANT ALL PRIVILEGES ON DATABASE kea TO admin;
-\q
 EOF
     
     # Apply database schemas
@@ -994,10 +1008,15 @@ configure_firewall() {
 start_services() {
     log "INFO" "Starting and enabling services..."
 
-    # Enable and start PostgreSQL (critical)
+    # Enable and start PostgreSQL (critical) - OS-aware service name
     log "INFO" "Starting PostgreSQL database..."
-    systemctl enable postgresql >/dev/null 2>&1
-    start_service_with_retry "postgresql" true
+    if [ "$PACKAGE_MANAGER" = "yum" ]; then
+        systemctl enable postgresql-16 >/dev/null 2>&1
+        start_service_with_retry "postgresql-16" true
+    else
+        systemctl enable postgresql >/dev/null 2>&1
+        start_service_with_retry "postgresql" true
+    fi
 
     # Enable and start Kea DHCP services (non-critical)
     log "INFO" "Starting Kea DHCP services..."
@@ -1054,10 +1073,21 @@ verify_services() {
     echo "🔍 SERVICE STATUS REPORT:"
     echo "========================="
 
-    # Check PostgreSQL
-    if systemctl is-active --quiet postgresql; then
-        echo "✅ PostgreSQL: RUNNING"
+    # Check PostgreSQL (OS-aware service name)
+    local pg_running=false
+    if [ "$PACKAGE_MANAGER" = "yum" ]; then
+        if systemctl is-active --quiet postgresql-16; then
+            echo "✅ PostgreSQL: RUNNING"
+            pg_running=true
+        fi
     else
+        if systemctl is-active --quiet postgresql; then
+            echo "✅ PostgreSQL: RUNNING"
+            pg_running=true
+        fi
+    fi
+
+    if [ "$pg_running" = false ]; then
         echo "❌ PostgreSQL: STOPPED"
     fi
 
@@ -1225,7 +1255,13 @@ display_summary() {
     echo -e "  🔐 Login Credentials: ${YELLOW}admin/admin${NC}"
     echo ""
     echo -e "${CYAN}🔧 Service Status:${NC}"
-    if systemctl is-active --quiet postgresql; then
+    # Check PostgreSQL (OS-aware)
+    local pg_service="postgresql"
+    if [ "$PACKAGE_MANAGER" = "yum" ]; then
+        pg_service="postgresql-16"
+    fi
+
+    if systemctl is-active --quiet "$pg_service"; then
         echo -e "  ✅ PostgreSQL Database: ${GREEN}RUNNING${NC}"
     else
         echo -e "  ❌ PostgreSQL Database: ${RED}STOPPED${NC}"
