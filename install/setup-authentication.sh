@@ -45,9 +45,9 @@ check_postgres() {
 # Function to setup database authentication
 setup_database_auth() {
     echo "🗄️  Setting up database authentication..."
-    
+
     # Create database user if it doesn't exist
-    PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U postgres -c "
+    sudo -u postgres psql -h "$DB_HOST" -p "$DB_PORT" -c "
         DO \$\$
         BEGIN
             IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$DB_USER') THEN
@@ -56,21 +56,41 @@ setup_database_auth() {
         END
         \$\$;
     " 2>/dev/null || echo "Database user may already exist"
-    
+
     # Create database if it doesn't exist
-    PGPASSWORD="$DB_PASSWORD" createdb -h "$DB_HOST" -p "$DB_PORT" -U postgres -O "$DB_USER" "$DB_NAME" 2>/dev/null || echo "Database may already exist"
-    
-    # Apply database schemas
+    sudo -u postgres createdb -h "$DB_HOST" -p "$DB_PORT" -O "$DB_USER" "$DB_NAME" 2>/dev/null || echo "Database may already exist"
+
+    # Grant admin user superuser privileges for schema management
+    sudo -u postgres psql -h "$DB_HOST" -p "$DB_PORT" -c "ALTER ROLE $DB_USER WITH SUPERUSER;" 2>/dev/null || true
+
+    # Apply database schemas as postgres user to avoid permission issues
     if [ -f "config/database/users-schema.sql" ]; then
         echo "  Applying users schema..."
-        PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f config/database/users-schema.sql
+        sudo -u postgres psql -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" -f config/database/users-schema.sql 2>&1 | grep -v "already exists" | grep -v "no privileges were granted" || true
     fi
-    
+
     if [ -f "config/database/dns-schema.sql" ]; then
         echo "  Applying DNS schema..."
-        PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f config/database/dns-schema.sql
+        sudo -u postgres psql -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" -f config/database/dns-schema.sql 2>&1 | grep -v "already exists" | grep -v "no privileges were granted" || true
     fi
-    
+
+    # Transfer ownership of all objects to admin user
+    sudo -u postgres psql -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" << EOF >/dev/null 2>&1
+        ALTER TABLE IF EXISTS users OWNER TO $DB_USER;
+        ALTER TABLE IF EXISTS user_sessions OWNER TO $DB_USER;
+        ALTER TABLE IF EXISTS dns_audit_log OWNER TO $DB_USER;
+        ALTER TABLE IF EXISTS ddns_status OWNER TO $DB_USER;
+        ALTER TABLE IF EXISTS dns_zones OWNER TO $DB_USER;
+        ALTER TABLE IF EXISTS dns_records_cache OWNER TO $DB_USER;
+        ALTER SEQUENCE IF EXISTS dns_audit_log_id_seq OWNER TO $DB_USER;
+        ALTER SEQUENCE IF EXISTS ddns_status_id_seq OWNER TO $DB_USER;
+        ALTER SEQUENCE IF EXISTS dns_zones_id_seq OWNER TO $DB_USER;
+        ALTER SEQUENCE IF EXISTS dns_records_cache_id_seq OWNER TO $DB_USER;
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DB_USER;
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO $DB_USER;
+        GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO $DB_USER;
+EOF
+
     echo "✅ Database authentication configured"
 }
 
