@@ -1205,44 +1205,63 @@ start_services() {
     # Enable and start Kea DHCP services (non-critical)
     log "INFO" "Starting Kea DHCP services..."
 
-    # Try different service names for Kea
+    # Try different service names for Kea - use more robust detection
     local kea_dhcp_services=("isc-kea-dhcp4-server" "kea-dhcp4-server")
     local kea_ca_services=("isc-kea-ctrl-agent" "kea-ctrl-agent")
     local kea_ddns_services=("isc-kea-dhcp-ddns-server" "kea-dhcp-ddns-server")
 
+    local kea_dhcp_started=false
     for service in "${kea_dhcp_services[@]}"; do
-        if systemctl list-unit-files | grep -q "$service.service"; then
+        if systemctl list-unit-files "${service}.service" >/dev/null 2>&1; then
             systemctl enable "$service" >/dev/null 2>&1 || true
             start_service_with_retry "$service" false
+            kea_dhcp_started=true
             break
         fi
     done
+    if [ "$kea_dhcp_started" = false ]; then
+        log "WARN" "No Kea DHCP4 service found"
+    fi
 
+    local kea_ca_started=false
     for service in "${kea_ca_services[@]}"; do
-        if systemctl list-unit-files | grep -q "$service.service"; then
+        if systemctl list-unit-files "${service}.service" >/dev/null 2>&1; then
             systemctl enable "$service" >/dev/null 2>&1 || true
             start_service_with_retry "$service" false
+            kea_ca_started=true
             break
         fi
     done
+    if [ "$kea_ca_started" = false ]; then
+        log "WARN" "No Kea Control Agent service found"
+    fi
 
+    local kea_ddns_started=false
     for service in "${kea_ddns_services[@]}"; do
-        if systemctl list-unit-files | grep -q "$service.service"; then
+        if systemctl list-unit-files "${service}.service" >/dev/null 2>&1; then
             systemctl enable "$service" >/dev/null 2>&1 || true
             start_service_with_retry "$service" false
+            kea_ddns_started=true
             break
         fi
     done
+    if [ "$kea_ddns_started" = false ]; then
+        log "WARN" "No Kea DDNS service found"
+    fi
 
     # Enable and start BIND9 DNS (non-critical)
     log "INFO" "Starting BIND9 DNS service..."
-    if systemctl list-unit-files | grep -q "bind9.service"; then
+    local bind_started=false
+    if systemctl list-unit-files "bind9.service" >/dev/null 2>&1; then
         systemctl enable bind9 >/dev/null 2>&1 || true
         start_service_with_retry "bind9" false
-    elif systemctl list-unit-files | grep -q "named.service"; then
+        bind_started=true
+    elif systemctl list-unit-files "named.service" >/dev/null 2>&1; then
         systemctl enable named >/dev/null 2>&1 || true
         start_service_with_retry "named" false
-    else
+        bind_started=true
+    fi
+    if [ "$bind_started" = false ]; then
         log "WARN" "No BIND9 service found"
     fi
 
