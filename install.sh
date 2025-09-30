@@ -5,12 +5,20 @@
 # ============================================================================
 # One-command installation for the complete SagaOS system
 # Supports Ubuntu 20.04+, CentOS 8+, RHEL 8+
-# 
+#
 # Usage: curl -fsSL https://raw.githubusercontent.com/saga-fiber/sagaos-kea-pilot/main/install.sh | sudo bash
 # Or:    sudo ./install.sh
 # ============================================================================
 
 set -euo pipefail
+
+# Ensure non-interactive mode for package installations
+export DEBIAN_FRONTEND=noninteractive
+
+# Global error tracking
+INSTALLATION_ERRORS=0
+CRITICAL_ERRORS=0
+WARNING_COUNT=0
 
 # Script configuration
 SCRIPT_VERSION="1.0.0"
@@ -58,16 +66,26 @@ log() {
     shift
     local message="$*"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     case "$level" in
         "INFO")
             echo -e "${GREEN}✅ $message${NC}"
             ;;
         "WARN")
             echo -e "${YELLOW}⚠️  $message${NC}"
+            ((WARNING_COUNT++))
             ;;
         "ERROR")
             echo -e "${RED}❌ $message${NC}"
+            ((INSTALLATION_ERRORS++))
+            ;;
+        "CRITICAL")
+            echo -e "${RED}🚨 CRITICAL: $message${NC}"
+            ((CRITICAL_ERRORS++))
+            ((INSTALLATION_ERRORS++))
+            ;;
+        "SUCCESS")
+            echo -e "${GREEN}🎉 $message${NC}"
             ;;
         "DEBUG")
             echo -e "${PURPLE}🔍 $message${NC}"
@@ -76,9 +94,252 @@ log() {
             echo -e "${BLUE}📋 $message${NC}"
             ;;
     esac
-    
+
     # Log to file
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+}
+
+# Enhanced error handling functions
+handle_package_error() {
+    local package_name="$1"
+    local error_message="$2"
+    local is_critical="${3:-false}"
+
+    if [ "$is_critical" = "true" ]; then
+        log "CRITICAL" "Failed to install critical package: $package_name"
+        log "ERROR" "$error_message"
+        log "ERROR" "Installation cannot continue without $package_name"
+        exit 1
+    else
+        log "ERROR" "Failed to install package: $package_name"
+        log "WARN" "$error_message"
+        log "INFO" "Installation will continue, but some features may not work"
+    fi
+}
+
+# Verify package installation
+verify_package_installed() {
+    local package_name="$1"
+    local package_manager="$2"
+
+    case "$package_manager" in
+        apt)
+            if dpkg -l | grep -q "^ii  $package_name "; then
+                log "SUCCESS" "Package $package_name installed successfully"
+                return 0
+            fi
+            ;;
+        yum)
+            if rpm -q "$package_name" >/dev/null 2>&1; then
+                log "SUCCESS" "Package $package_name installed successfully"
+                return 0
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+# Install package with retry and error handling
+install_package_with_retry() {
+    local package_name="$1"
+    local package_manager="$2"
+    local is_critical="${3:-false}"
+    local max_retries=3
+    local retry_count=0
+
+    log "INFO" "Installing package: $package_name"
+
+    while [ $retry_count -lt $max_retries ]; do
+        case "$package_manager" in
+            apt)
+                if apt install -y "$package_name" >/dev/null 2>&1; then
+                    if verify_package_installed "$package_name" "$package_manager"; then
+                        return 0
+                    fi
+                fi
+                ;;
+            yum)
+                if yum install -y "$package_name" >/dev/null 2>&1; then
+                    if verify_package_installed "$package_name" "$package_manager"; then
+                        return 0
+                    fi
+                fi
+                ;;
+        esac
+
+        ((retry_count++))
+        if [ $retry_count -lt $max_retries ]; then
+            log "WARN" "Package installation failed, retrying ($retry_count/$max_retries)..."
+            sleep 2
+        fi
+    done
+
+    handle_package_error "$package_name" "Failed after $max_retries attempts" "$is_critical"
+    return 1
+}
+
+# Add repository safely with error handling
+add_repository_safely() {
+    local repo_description="$1"
+    local repo_command="$2"
+    local is_critical="${3:-false}"
+
+    log "INFO" "Adding repository: $repo_description"
+
+    if eval "$repo_command" >/dev/null 2>&1; then
+        log "SUCCESS" "Repository added: $repo_description"
+        return 0
+    else
+        if [ "$is_critical" = "true" ]; then
+            log "CRITICAL" "Failed to add critical repository: $repo_description"
+            exit 1
+        else
+            log "ERROR" "Failed to add repository: $repo_description"
+            return 1
+        fi
+    fi
+}
+
+# Setup Kea DHCP repository
+setup_kea_repository() {
+    log "INFO" "Setting up Kea DHCP repository..."
+
+    case "$PACKAGE_MANAGER" in
+        apt)
+            # Try ISC Kea official repository first
+            if add_repository_safely "ISC Kea Repository" "curl -1sLf 'https://dl.cloudsmith.io/public/isc/kea-3-0/setup.deb.sh' | bash"; then
+                apt update >/dev/null 2>&1
+                log "SUCCESS" "ISC Kea repository added successfully"
+                return 0
+            fi
+
+            # Fallback: Try to enable universe repository for older Kea packages
+            log "WARN" "ISC repository failed, trying universe repository..."
+            if add_repository_safely "Universe Repository" "add-apt-repository universe -y"; then
+                apt update >/dev/null 2>&1
+                log "INFO" "Universe repository enabled (may have older Kea packages)"
+                return 0
+            fi
+
+            log "ERROR" "Failed to add any Kea repository"
+            return 1
+            ;;
+        yum)
+            log "WARN" "Kea DHCP installation on CentOS/RHEL requires manual setup"
+            log "INFO" "Please refer to: https://kea.readthedocs.io/en/latest/arm/install.html"
+            return 1
+            ;;
+    esac
+}
+
+# Install Kea DHCP packages with fallback options
+install_kea_packages() {
+    log "INFO" "Installing Kea DHCP packages..."
+
+    # Setup repository first
+    if ! setup_kea_repository; then
+        log "ERROR" "Cannot install Kea packages without repository"
+        return 1
+    fi
+
+    case "$PACKAGE_MANAGER" in
+        apt)
+            # Try official ISC package names first
+            local kea_packages=("isc-kea-dhcp4-server" "isc-kea-ctrl-agent" "isc-kea-admin" "isc-kea-common")
+            local installed_packages=0
+
+            for package in "${kea_packages[@]}"; do
+                if install_package_with_retry "$package" "$PACKAGE_MANAGER" false; then
+                    ((installed_packages++))
+                fi
+            done
+
+            # If official packages failed, try alternative names
+            if [ $installed_packages -eq 0 ]; then
+                log "WARN" "Official Kea packages failed, trying alternative names..."
+                local alt_packages=("kea-dhcp4-server" "kea-ctrl-agent" "kea-admin" "kea-common")
+
+                for package in "${alt_packages[@]}"; do
+                    if install_package_with_retry "$package" "$PACKAGE_MANAGER" false; then
+                        ((installed_packages++))
+                    fi
+                done
+            fi
+
+            if [ $installed_packages -gt 0 ]; then
+                log "SUCCESS" "Kea DHCP packages installed ($installed_packages packages)"
+                return 0
+            else
+                log "ERROR" "Failed to install any Kea DHCP packages"
+                log "INFO" "Manual installation may be required"
+                return 1
+            fi
+            ;;
+        yum)
+            log "ERROR" "Kea DHCP installation on CentOS/RHEL requires manual setup"
+            return 1
+            ;;
+    esac
+}
+
+# Enhanced service management functions
+start_service_with_retry() {
+    local service_name="$1"
+    local is_critical="${2:-false}"
+    local max_retries=3
+    local retry_count=0
+
+    log "INFO" "Starting service: $service_name"
+
+    while [ $retry_count -lt $max_retries ]; do
+        if systemctl start "$service_name" >/dev/null 2>&1; then
+            sleep 2  # Give service time to start
+            if systemctl is-active --quiet "$service_name"; then
+                log "SUCCESS" "Service $service_name started successfully"
+                return 0
+            fi
+        fi
+
+        ((retry_count++))
+        if [ $retry_count -lt $max_retries ]; then
+            log "WARN" "Service startup failed, retrying ($retry_count/$max_retries)..."
+            sleep 3
+        fi
+    done
+
+    if [ "$is_critical" = "true" ]; then
+        log "CRITICAL" "Failed to start critical service: $service_name"
+        log "ERROR" "Installation cannot continue without $service_name"
+        exit 1
+    else
+        log "ERROR" "Failed to start service: $service_name"
+        log "INFO" "You may need to start this service manually later"
+        return 1
+    fi
+}
+
+# Verify service health
+verify_service_health() {
+    local service_name="$1"
+    local port="${2:-}"
+
+    if systemctl is-active --quiet "$service_name"; then
+        log "SUCCESS" "Service $service_name is running"
+
+        # Check port if provided
+        if [ -n "$port" ]; then
+            if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
+                log "SUCCESS" "Service $service_name is listening on port $port"
+            else
+                log "WARN" "Service $service_name is running but not listening on port $port"
+            fi
+        fi
+        return 0
+    else
+        log "ERROR" "Service $service_name is not running"
+        return 1
+    fi
 }
 
 # Function to display usage
@@ -216,47 +477,56 @@ install_dependencies() {
         log "INFO" "Skipping dependency installation"
         return
     fi
-    
+
     log "INFO" "Installing system dependencies..."
-    
+
     case "$PACKAGE_MANAGER" in
         apt)
             # Update package lists
-            apt update
-            
-            # Install essential packages
-            apt install -y \
-                curl \
-                wget \
-                git \
-                unzip \
-                software-properties-common \
-                apt-transport-https \
-                ca-certificates \
-                gnupg \
-                lsb-release \
-                jq \
-                openssl \
-                ufw
-            
+            log "INFO" "Updating package lists..."
+            if ! apt update >/dev/null 2>&1; then
+                log "ERROR" "Failed to update package lists"
+                exit 1
+            fi
+
+            # Install essential packages with error handling
+            log "INFO" "Installing essential packages..."
+            local essential_packages=(
+                "curl" "wget" "git" "unzip" "software-properties-common"
+                "apt-transport-https" "ca-certificates" "gnupg" "lsb-release"
+                "jq" "openssl" "ufw"
+            )
+
+            for package in "${essential_packages[@]}"; do
+                install_package_with_retry "$package" "$PACKAGE_MANAGER" true
+            done
+
             # Install Node.js 18.x
-            curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-            apt install -y nodejs
-            
-            # Install PostgreSQL 15
-            wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-            echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-            apt update
-            apt install -y postgresql-15 postgresql-client-15
-            
-            # Install Kea DHCP
-            apt install -y isc-kea-dhcp4-server isc-kea-ctrl-agent isc-kea-admin
-            
+            log "INFO" "Installing Node.js 18.x..."
+            if add_repository_safely "Node.js Repository" "curl -fsSL https://deb.nodesource.com/setup_18.x | bash" true; then
+                install_package_with_retry "nodejs" "$PACKAGE_MANAGER" true
+            fi
+
+            # Install PostgreSQL 16 (latest stable, avoids upgrade dialogs)
+            log "INFO" "Installing PostgreSQL 16..."
+            if add_repository_safely "PostgreSQL Repository" "wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - && echo 'deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main' > /etc/apt/sources.list.d/pgdg.list && apt update" true; then
+                install_package_with_retry "postgresql-16" "$PACKAGE_MANAGER" true
+                install_package_with_retry "postgresql-client-16" "$PACKAGE_MANAGER" true
+            fi
+
+            # Install Kea DHCP with enhanced error handling
+            log "INFO" "Installing Kea DHCP..."
+            install_kea_packages
+
             # Install BIND9
-            apt install -y bind9 bind9utils bind9-dnsutils
-            
+            log "INFO" "Installing BIND9..."
+            install_package_with_retry "bind9" "$PACKAGE_MANAGER" false
+            install_package_with_retry "bind9utils" "$PACKAGE_MANAGER" false
+            install_package_with_retry "bind9-dnsutils" "$PACKAGE_MANAGER" false
+
             # Install Nginx
-            apt install -y nginx
+            log "INFO" "Installing Nginx..."
+            install_package_with_retry "nginx" "$PACKAGE_MANAGER" false
             ;;
         yum)
             # Update package lists
@@ -279,9 +549,9 @@ install_dependencies() {
             curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
             yum install -y nodejs
             
-            # Install PostgreSQL 15
+            # Install PostgreSQL 16 (latest stable)
             yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-            yum install -y postgresql15-server postgresql15
+            yum install -y postgresql16-server postgresql16
             
             # Install Kea DHCP (from source or third-party repo)
             log "WARN" "Kea DHCP installation on CentOS/RHEL requires manual setup"
@@ -376,7 +646,7 @@ setup_database() {
     
     # Initialize PostgreSQL if needed
     if [ "$PACKAGE_MANAGER" = "yum" ]; then
-        /usr/pgsql-15/bin/postgresql-15-setup initdb
+        /usr/pgsql-16/bin/postgresql-16-setup initdb
     fi
     
     # Start and enable PostgreSQL
@@ -500,27 +770,194 @@ configure_firewall() {
     log "INFO" "Firewall configured"
 }
 
-# Function to start services
+# Function to start and enable services
 start_services() {
-    log "INFO" "Starting services..."
-    
-    # Start database
-    systemctl start postgresql
-    
-    # Start Kea services
-    systemctl start isc-kea-dhcp4-server || true
-    systemctl start isc-kea-ctrl-agent || true
-    
-    # Start BIND9
-    systemctl start bind9 || systemctl start named || true
-    
-    # Start SagaOS API
-    systemctl start sagaos-api
-    
-    # Start Nginx
-    systemctl start nginx
-    
-    log "INFO" "Services started"
+    log "INFO" "Starting and enabling services..."
+
+    # Enable and start PostgreSQL (critical)
+    log "INFO" "Starting PostgreSQL database..."
+    systemctl enable postgresql >/dev/null 2>&1
+    start_service_with_retry "postgresql" true
+
+    # Enable and start Kea DHCP services (non-critical)
+    log "INFO" "Starting Kea DHCP services..."
+
+    # Try different service names for Kea
+    local kea_dhcp_services=("isc-kea-dhcp4-server" "kea-dhcp4-server")
+    local kea_ca_services=("isc-kea-ctrl-agent" "kea-ctrl-agent")
+
+    for service in "${kea_dhcp_services[@]}"; do
+        if systemctl list-unit-files | grep -q "$service.service"; then
+            systemctl enable "$service" >/dev/null 2>&1 || true
+            start_service_with_retry "$service" false
+            break
+        fi
+    done
+
+    for service in "${kea_ca_services[@]}"; do
+        if systemctl list-unit-files | grep -q "$service.service"; then
+            systemctl enable "$service" >/dev/null 2>&1 || true
+            start_service_with_retry "$service" false
+            break
+        fi
+    done
+
+    # Enable and start BIND9 DNS (non-critical)
+    log "INFO" "Starting BIND9 DNS service..."
+    if systemctl list-unit-files | grep -q "bind9.service"; then
+        systemctl enable bind9 >/dev/null 2>&1 || true
+        start_service_with_retry "bind9" false
+    elif systemctl list-unit-files | grep -q "named.service"; then
+        systemctl enable named >/dev/null 2>&1 || true
+        start_service_with_retry "named" false
+    else
+        log "WARN" "No BIND9 service found"
+    fi
+
+    # Enable and start SagaOS API Gateway (critical)
+    log "INFO" "Starting SagaOS API Gateway..."
+    systemctl enable sagaos-api >/dev/null 2>&1 || true
+    start_service_with_retry "sagaos-api" true
+
+    # Enable and start Nginx (non-critical)
+    log "INFO" "Starting Nginx web server..."
+    systemctl enable nginx >/dev/null 2>&1 || true
+    start_service_with_retry "nginx" false
+
+    log "SUCCESS" "Service startup completed"
+}
+
+# Function to verify service status
+verify_services() {
+    log "INFO" "Verifying service status..."
+    echo ""
+    echo "🔍 SERVICE STATUS REPORT:"
+    echo "========================="
+
+    # Check PostgreSQL
+    if systemctl is-active --quiet postgresql; then
+        echo "✅ PostgreSQL: RUNNING"
+    else
+        echo "❌ PostgreSQL: STOPPED"
+    fi
+
+    # Check Kea DHCP (try different service names)
+    local kea_dhcp_running=false
+    for service in "isc-kea-dhcp4-server" "kea-dhcp4-server"; do
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            echo "✅ Kea DHCP4 ($service): RUNNING"
+            kea_dhcp_running=true
+            break
+        fi
+    done
+    if [ "$kea_dhcp_running" = false ]; then
+        echo "❌ Kea DHCP4: STOPPED"
+    fi
+
+    # Check Kea Control Agent (try different service names)
+    local kea_ca_running=false
+    for service in "isc-kea-ctrl-agent" "kea-ctrl-agent"; do
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            echo "✅ Kea Control Agent ($service): RUNNING"
+            kea_ca_running=true
+            break
+        fi
+    done
+    if [ "$kea_ca_running" = false ]; then
+        echo "❌ Kea Control Agent: STOPPED"
+    fi
+
+    # Check BIND9/Named
+    if systemctl is-active --quiet bind9; then
+        echo "✅ BIND9 DNS: RUNNING"
+    elif systemctl is-active --quiet named; then
+        echo "✅ Named DNS: RUNNING"
+    else
+        echo "❌ DNS Service: STOPPED"
+    fi
+
+    # Check SagaOS API
+    if systemctl is-active --quiet sagaos-api; then
+        echo "✅ SagaOS API Gateway: RUNNING"
+    else
+        echo "❌ SagaOS API Gateway: STOPPED"
+    fi
+
+    # Check Nginx
+    if systemctl is-active --quiet nginx; then
+        echo "✅ Nginx Web Server: RUNNING"
+    else
+        echo "❌ Nginx Web Server: STOPPED"
+    fi
+
+    echo ""
+    log "INFO" "Service verification complete"
+}
+
+# Enhanced installation summary with error reporting
+display_installation_summary() {
+    echo ""
+    echo "🎯 INSTALLATION SUMMARY"
+    echo "======================="
+    echo ""
+
+    # Error summary
+    if [ $CRITICAL_ERRORS -gt 0 ]; then
+        echo "🚨 CRITICAL ERRORS: $CRITICAL_ERRORS"
+        echo "❌ Installation failed due to critical errors"
+        echo ""
+        echo "🔧 TROUBLESHOOTING:"
+        echo "   - Check the installation log: $LOG_FILE"
+        echo "   - Ensure you have root privileges"
+        echo "   - Verify internet connectivity"
+        echo "   - Check system requirements"
+        echo ""
+        return 1
+    elif [ $INSTALLATION_ERRORS -gt 0 ]; then
+        echo "⚠️  WARNINGS: $WARNING_COUNT"
+        echo "❌ ERRORS: $INSTALLATION_ERRORS (non-critical)"
+        echo "✅ Installation completed with some issues"
+        echo ""
+        echo "🔧 RECOMMENDATIONS:"
+        echo "   - Review the installation log: $LOG_FILE"
+        echo "   - Some features may not work properly"
+        echo "   - Consider manual installation of failed components"
+        echo ""
+    else
+        echo "✅ PERFECT INSTALLATION!"
+        echo "🎉 No errors or warnings detected"
+        echo ""
+    fi
+
+    # Access information
+    echo "🌐 ACCESS INFORMATION:"
+    echo "   📱 Frontend: http://localhost:5173"
+    echo "   🔌 API Gateway: http://localhost:3001"
+    echo "   🗄️  Database: localhost:5432 (user: admin, db: kea)"
+    echo "   🌐 Kea Control: http://localhost:8000"
+    echo ""
+
+    # Service management
+    echo "🔧 SERVICE MANAGEMENT:"
+    echo "   📊 Check status: sudo ./scripts/check-services.sh"
+    echo "   🔄 Restart all: sudo systemctl restart sagaos-*"
+    echo "   📋 View logs: sudo journalctl -u sagaos-api -f"
+    echo ""
+
+    # Next steps
+    echo "🚀 NEXT STEPS:"
+    echo "   1. 🔍 Verify all services: sudo ./scripts/check-services.sh"
+    echo "   2. 🌐 Open http://localhost:5173 in your browser"
+    echo "   3. 🔑 Login with admin/admin (change password immediately)"
+    echo "   4. 📖 Read documentation: ./README.md"
+    echo ""
+
+    if [ $INSTALLATION_ERRORS -eq 0 ]; then
+        echo "🎊 CONGRATULATIONS! SagaOS is ready to use!"
+    else
+        echo "⚠️  Installation completed but please review any errors above"
+    fi
+    echo ""
 }
 
 # Function to run post-installation tests
@@ -562,14 +999,50 @@ display_summary() {
     echo -e "  📁 Installation Directory: ${YELLOW}$INSTALL_DIR${NC}"
     echo -e "  👤 Service User: ${YELLOW}$SERVICE_USER${NC}"
     echo -e "  🗄️  Database: ${YELLOW}PostgreSQL (admin/admin)${NC}"
-    echo -e "  🌐 Web Interface: ${YELLOW}http://$(hostname -I | awk '{print $1}')${NC}"
+    echo -e "  🌐 Frontend: ${YELLOW}http://$(hostname -I | awk '{print $1}'):5173${NC}"
+    echo -e "  🔧 API Gateway: ${YELLOW}http://$(hostname -I | awk '{print $1}'):3001${NC}"
+    echo -e "  📊 Health Check: ${YELLOW}http://$(hostname -I | awk '{print $1}'):3001/api/health${NC}"
     echo -e "  🔐 Login Credentials: ${YELLOW}admin/admin${NC}"
     echo ""
-    echo -e "${CYAN}🚀 Next Steps:${NC}"
-    echo -e "  1. Open web browser to: ${YELLOW}http://$(hostname -I | awk '{print $1}')${NC}"
-    echo -e "  2. Login with: ${YELLOW}admin/admin${NC}"
-    echo -e "  3. Configure your DHCP and DNS settings"
+    echo -e "${CYAN}🔧 Service Status:${NC}"
+    if systemctl is-active --quiet postgresql; then
+        echo -e "  ✅ PostgreSQL Database: ${GREEN}RUNNING${NC}"
+    else
+        echo -e "  ❌ PostgreSQL Database: ${RED}STOPPED${NC}"
+    fi
+    if systemctl is-active --quiet sagaos-api; then
+        echo -e "  ✅ SagaOS API Gateway: ${GREEN}RUNNING${NC}"
+    else
+        echo -e "  ❌ SagaOS API Gateway: ${RED}STOPPED${NC}"
+    fi
+    if systemctl is-active --quiet isc-kea-dhcp4-server; then
+        echo -e "  ✅ Kea DHCP Server: ${GREEN}RUNNING${NC}"
+    else
+        echo -e "  ❌ Kea DHCP Server: ${RED}STOPPED${NC}"
+    fi
+    if systemctl is-active --quiet bind9 || systemctl is-active --quiet named; then
+        echo -e "  ✅ DNS Server: ${GREEN}RUNNING${NC}"
+    else
+        echo -e "  ❌ DNS Server: ${RED}STOPPED${NC}"
+    fi
+    if systemctl is-active --quiet nginx; then
+        echo -e "  ✅ Nginx Web Server: ${GREEN}RUNNING${NC}"
+    else
+        echo -e "  ❌ Nginx Web Server: ${RED}STOPPED${NC}"
+    fi
+    echo ""
+    echo -e "${CYAN}🚀 Quick Start:${NC}"
+    echo -e "  1. Frontend: ${YELLOW}http://$(hostname -I | awk '{print $1}'):5173${NC}"
+    echo -e "  2. API Health: ${YELLOW}curl http://$(hostname -I | awk '{print $1}'):3001/api/health${NC}"
+    echo -e "  3. Login with: ${YELLOW}admin/admin${NC}"
     echo -e "  4. ${RED}IMPORTANT: Change default passwords for production!${NC}"
+    echo ""
+    echo -e "${CYAN}🛠️  Service Management:${NC}"
+    echo -e "  📊 Check Status: ${YELLOW}sudo systemctl status sagaos-api${NC}"
+    echo -e "  🔄 Restart Services: ${YELLOW}sudo systemctl restart sagaos-api${NC}"
+    echo -e "  📋 View Logs: ${YELLOW}sudo journalctl -u sagaos-api -f${NC}"
+    echo -e "  🔧 Stop Services: ${YELLOW}sudo systemctl stop sagaos-api${NC}"
+    echo -e "  ▶️  Start Services: ${YELLOW}sudo systemctl start sagaos-api${NC}"
     echo ""
     echo -e "${CYAN}📚 Documentation:${NC}"
     echo -e "  📖 User Guide: ${YELLOW}$INSTALL_DIR/docs/USER_GUIDE.md${NC}"
@@ -655,12 +1128,19 @@ main() {
     install_systemd_services
     configure_firewall
     start_services
+    verify_services
     run_tests
-    
+
     # Post-installation
-    display_summary
-    
-    log "INFO" "Installation completed successfully!"
+    display_installation_summary
+
+    if [ $CRITICAL_ERRORS -eq 0 ]; then
+        log "SUCCESS" "Installation completed!"
+        exit 0
+    else
+        log "ERROR" "Installation failed due to critical errors"
+        exit 1
+    fi
 }
 
 # Create log directory
