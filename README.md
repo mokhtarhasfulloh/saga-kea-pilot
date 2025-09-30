@@ -183,39 +183,33 @@ graph TB
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- **Node.js 18+** with npm package manager
-- **PostgreSQL 14+** database server
-- **Kea DHCP 2.4+** with Control Agent enabled
-- **BIND9** DNS server (optional, for DNS management)
-- **Ubuntu 20.04+** or similar Linux distribution
+### ⚡ **One-Command Installation**
 
-### Installation Options
-
-#### Option 1: Automated Installation (Recommended)
+**🐧 Linux (Ubuntu/Debian/CentOS/RHEL):**
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd sagaos-kea-pilot
-
-# Run automated setup (installs all dependencies and services)
-sudo ./install.sh
-
-# Start the application
-npm run dev
+curl -fsSL https://raw.githubusercontent.com/BlaineHolmes/saga-kea-pilot/main/install.sh | sudo bash
 ```
 
-#### Option 2: Docker Deployment
+**🐳 Docker:**
 ```bash
-# Clone and build with Docker Compose
-git clone <repository-url>
-cd sagaos-kea-pilot
-
-# Start all services with Docker
-docker-compose up -d
-
-# Access the application at http://localhost:80
+git clone https://github.com/BlaineHolmes/saga-kea-pilot.git
+cd saga-kea-pilot && sudo docker-compose up -d
 ```
+
+### 🌐 **Access Your Installation**
+
+After installation, access the web interface:
+- **Frontend**: http://localhost:5173
+- **API Gateway**: http://localhost:3001
+- **Health Check**: http://localhost:3001/api/health
+
+**Default Login**: `admin` / `admin` ⚠️ **Change for production!**
+
+### 📋 **Prerequisites**
+- **OS**: Ubuntu 20.04+, CentOS 8+, RHEL 8+, Debian 11+
+- **RAM**: 4GB minimum, 8GB recommended
+- **Storage**: 20GB minimum
+- **Network**: Internet connection for installation
 
 #### Option 3: Manual Installation
 ```bash
