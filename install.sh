@@ -124,14 +124,35 @@ verify_package_installed() {
 
     case "$package_manager" in
         apt)
-            if dpkg -l | grep -q "^ii  $package_name "; then
-                log "SUCCESS" "Package $package_name installed successfully"
+            if dpkg -l "$package_name" 2>/dev/null | grep -q "^ii"; then
                 return 0
             fi
             ;;
         yum)
             if rpm -q "$package_name" >/dev/null 2>&1; then
-                log "SUCCESS" "Package $package_name installed successfully"
+                return 0
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+# Check if package is already installed
+is_package_installed() {
+    local package_name="$1"
+    local package_manager="$2"
+
+    case "$package_manager" in
+        apt)
+            if dpkg -l "$package_name" 2>/dev/null | grep -q "^ii"; then
+                log "INFO" "Package $package_name is already installed"
+                return 0
+            fi
+            ;;
+        yum)
+            if rpm -q "$package_name" >/dev/null 2>&1; then
+                log "INFO" "Package $package_name is already installed"
                 return 0
             fi
             ;;
@@ -148,6 +169,12 @@ install_package_with_retry() {
     local max_retries=3
     local retry_count=0
 
+    # Check if package is already installed
+    if is_package_installed "$package_name" "$package_manager"; then
+        log "SUCCESS" "Package $package_name already installed"
+        return 0
+    fi
+
     log "INFO" "Installing package: $package_name"
 
     while [ $retry_count -lt $max_retries ]; do
@@ -155,6 +182,7 @@ install_package_with_retry() {
             apt)
                 if apt install -y "$package_name" >/dev/null 2>&1; then
                     if verify_package_installed "$package_name" "$package_manager"; then
+                        log "SUCCESS" "Package $package_name installed successfully"
                         return 0
                     fi
                 fi
@@ -162,6 +190,7 @@ install_package_with_retry() {
             yum)
                 if yum install -y "$package_name" >/dev/null 2>&1; then
                     if verify_package_installed "$package_name" "$package_manager"; then
+                        log "SUCCESS" "Package $package_name installed successfully"
                         return 0
                     fi
                 fi
