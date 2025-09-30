@@ -73,16 +73,16 @@ log() {
             ;;
         "WARN")
             echo -e "${YELLOW}⚠️  $message${NC}"
-            ((WARNING_COUNT++))
+            WARNING_COUNT=$((WARNING_COUNT + 1))
             ;;
         "ERROR")
             echo -e "${RED}❌ $message${NC}"
-            ((INSTALLATION_ERRORS++))
+            INSTALLATION_ERRORS=$((INSTALLATION_ERRORS + 1))
             ;;
         "CRITICAL")
             echo -e "${RED}🚨 CRITICAL: $message${NC}"
-            ((CRITICAL_ERRORS++))
-            ((INSTALLATION_ERRORS++))
+            CRITICAL_ERRORS=$((CRITICAL_ERRORS + 1))
+            INSTALLATION_ERRORS=$((INSTALLATION_ERRORS + 1))
             ;;
         "SUCCESS")
             echo -e "${GREEN}🎉 $message${NC}"
@@ -197,7 +197,7 @@ install_package_with_retry() {
                 ;;
         esac
 
-        ((retry_count++))
+        retry_count=$((retry_count + 1))
         if [ $retry_count -lt $max_retries ]; then
             log "WARN" "Package installation failed, retrying ($retry_count/$max_retries)..."
             sleep 2
@@ -280,7 +280,7 @@ install_kea_packages() {
 
             for package in "${kea_packages[@]}"; do
                 if install_package_with_retry "$package" "$PACKAGE_MANAGER" false; then
-                    ((installed_packages++))
+                    installed_packages=$((installed_packages + 1))
                 fi
             done
 
@@ -291,7 +291,7 @@ install_kea_packages() {
 
                 for package in "${alt_packages[@]}"; do
                     if install_package_with_retry "$package" "$PACKAGE_MANAGER" false; then
-                        ((installed_packages++))
+                        installed_packages=$((installed_packages + 1))
                     fi
                 done
             fi
@@ -319,9 +319,11 @@ install_kea_packages() {
 configure_kea_services() {
     log "INFO" "Configuring Kea DHCP services..."
 
-    # Create Kea directories
-    mkdir -p /etc/kea /var/lib/kea /var/log/kea
+    # Create Kea directories with proper permissions
+    mkdir -p /etc/kea /var/lib/kea /var/log/kea /var/run/kea
+    chmod 755 /etc/kea  # Allow _kea user to read configs
     chown -R root:root /etc/kea
+    chown -R _kea:_kea /var/run/kea 2>/dev/null || chown -R root:root /var/run/kea
 
     # Create basic DHCP4 configuration if it doesn't exist
     if [ ! -f "/etc/kea/kea-dhcp4.conf" ]; then
@@ -334,7 +336,7 @@ configure_kea_services() {
         },
         "control-socket": {
             "socket-type": "unix",
-            "socket-name": "/tmp/kea4-ctrl-socket"
+            "socket-name": "/var/run/kea/kea4-ctrl-socket"
         },
         "lease-database": {
             "type": "memfile",
@@ -391,20 +393,39 @@ EOF
         cat > /etc/kea/kea-ctrl-agent.conf << 'EOF'
 {
     "Control-agent": {
-        "http-host": "127.0.0.1",
+        "http-host": "0.0.0.0",
         "http-port": 8000,
+        "authentication": {
+            "type": "basic",
+            "realm": "SagaOS Kea Control Agent",
+            "clients": [
+                {
+                    "user": "admin",
+                    "password": "admin",
+                    "comment": "Default admin user - CHANGE IN PRODUCTION"
+                }
+            ]
+        },
         "control-sockets": {
             "dhcp4": {
                 "socket-type": "unix",
-                "socket-name": "/tmp/kea4-ctrl-socket"
+                "socket-name": "/var/run/kea/kea4-ctrl-socket"
+            },
+            "dhcp6": {
+                "socket-type": "unix",
+                "socket-name": "/var/run/kea/kea6-ctrl-socket"
             }
         },
+        "hooks-libraries": [],
         "loggers": [
             {
                 "name": "kea-ctrl-agent",
                 "output_options": [
                     {
-                        "output": "/var/log/kea/kea-ctrl-agent.log"
+                        "output": "/var/log/kea/kea-ctrl-agent.log",
+                        "maxver": 10,
+                        "maxsize": 10485760,
+                        "flush": true
                     }
                 ],
                 "severity": "INFO",
@@ -446,7 +467,7 @@ start_service_with_retry() {
             fi
         fi
 
-        ((retry_count++))
+        retry_count=$((retry_count + 1))
         if [ $retry_count -lt $max_retries ]; then
             log "WARN" "Service startup failed, retrying ($retry_count/$max_retries)..."
             sleep 3
@@ -598,8 +619,13 @@ check_requirements() {
     
     # Check available disk space
     local disk_gb=$(df / | awk 'NR==2{print int($4/1024/1024)}')
-    if [ "$disk_gb" -lt 20 ]; then
-        log "ERROR" "Insufficient disk space. Need 20GB, have ${disk_gb}GB"
+    local min_disk=20
+    if [ "$FORCE" = true ]; then
+        min_disk=5
+        log "WARN" "Force mode: Reduced disk space requirement to ${min_disk}GB"
+    fi
+    if [ "$disk_gb" -lt "$min_disk" ]; then
+        log "ERROR" "Insufficient disk space. Need ${min_disk}GB, have ${disk_gb}GB"
         exit 1
     else
         log "INFO" "Disk space: ${disk_gb}GB (sufficient)"
@@ -646,9 +672,9 @@ install_dependencies() {
                 install_package_with_retry "$package" "$PACKAGE_MANAGER" true
             done
 
-            # Install Node.js 18.x
-            log "INFO" "Installing Node.js 18.x..."
-            if add_repository_safely "Node.js Repository" "curl -fsSL https://deb.nodesource.com/setup_18.x | bash" true; then
+            # Install Node.js 20.x (required for Vite 7 and React Router 7)
+            log "INFO" "Installing Node.js 20.x..."
+            if add_repository_safely "Node.js Repository" "curl -fsSL https://deb.nodesource.com/setup_20.x | bash" true; then
                 install_package_with_retry "nodejs" "$PACKAGE_MANAGER" true
             fi
 
@@ -799,19 +825,25 @@ download_sagaos() {
 # Function to install Node.js dependencies
 install_node_dependencies() {
     log "INFO" "Installing Node.js dependencies..."
-    
+
     cd "$INSTALL_DIR"
-    
-    # Install backend dependencies
+
+    # Install all dependencies (including devDependencies needed for build)
     if [ -f "package.json" ]; then
-        sudo -u "$SERVICE_USER" npm install --production
-        log "INFO" "Backend dependencies installed"
+        sudo -u "$SERVICE_USER" npm install
+        log "INFO" "Node.js dependencies installed"
     fi
-    
-    # Install frontend dependencies and build
+
+    # Build frontend
     if [ -f "package.json" ]; then
         sudo -u "$SERVICE_USER" npm run build
         log "INFO" "Frontend built successfully"
+    fi
+
+    # Clean up devDependencies after build to save space
+    if [ -f "package.json" ]; then
+        sudo -u "$SERVICE_USER" npm prune --production
+        log "INFO" "Development dependencies removed"
     fi
 }
 
@@ -831,7 +863,7 @@ setup_database() {
         systemctl start postgresql
     fi
 
-    # Create database and user (idempotent - safe to re-run)
+    # Create database user (idempotent - safe to re-run)
     sudo -u postgres psql << 'EOF'
 DO $$
 BEGIN
@@ -839,16 +871,14 @@ BEGIN
       CREATE ROLE admin LOGIN PASSWORD 'admin';
    END IF;
 END$$;
-
-DO $$
-BEGIN
-   IF NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kea') THEN
-      CREATE DATABASE kea OWNER admin;
-   END IF;
-END$$;
-
-GRANT ALL PRIVILEGES ON DATABASE kea TO admin;
 EOF
+
+    # Create database if it doesn't exist (cannot be done in DO block)
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'kea'" | grep -q 1 || \
+        sudo -u postgres psql -c "CREATE DATABASE kea OWNER admin"
+
+    # Grant privileges
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE kea TO admin"
     
     # Apply database schemas
     if [ -f "$INSTALL_DIR/config/database/users-schema.sql" ]; then
@@ -880,7 +910,7 @@ configure_services() {
     # Generate configurations
     if [ -f "$INSTALL_DIR/install/template-generator.sh" ]; then
         cd "$INSTALL_DIR"
-        bash install/template-generator.sh generate --env development
+        bash install/template-generator.sh all --env-file .env || true
     fi
     
     log "INFO" "Service configuration completed"
@@ -920,10 +950,80 @@ EnvironmentFile=$INSTALL_DIR/.env
 WantedBy=multi-user.target
 EOF
     
+    # Create Nginx configuration for SagaOS frontend
+    log "INFO" "Configuring Nginx for SagaOS frontend..."
+    cat > /etc/nginx/sites-available/sagaos << 'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    # Frontend - serve built static files
+    root /opt/sagaos/dist;
+    index index.html;
+
+    # Frontend routes - SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API Gateway proxy
+    location /api/ {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Kea Control Agent proxy (optional - for direct access)
+    location /kea/ {
+        proxy_pass http://localhost:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json application/javascript;
+}
+EOF
+
+    # Enable the site
+    if [ -d "/etc/nginx/sites-enabled" ]; then
+        rm -f /etc/nginx/sites-enabled/default
+        ln -sf /etc/nginx/sites-available/sagaos /etc/nginx/sites-enabled/sagaos
+    else
+        # For systems without sites-enabled (like CentOS)
+        rm -f /etc/nginx/conf.d/default.conf
+        ln -sf /etc/nginx/sites-available/sagaos /etc/nginx/conf.d/sagaos.conf
+    fi
+
+    # Test Nginx configuration
+    if nginx -t >/dev/null 2>&1; then
+        log "SUCCESS" "Nginx configuration valid"
+    else
+        log "WARN" "Nginx configuration test failed - check manually"
+    fi
+
     # Reload systemd and enable services
     systemctl daemon-reload
     systemctl enable sagaos-api
-    
+
     log "INFO" "Systemd services installed"
 }
 
@@ -1288,10 +1388,11 @@ display_summary() {
     fi
     echo ""
     echo -e "${CYAN}🚀 Quick Start:${NC}"
-    echo -e "  1. Frontend: ${YELLOW}http://$(hostname -I | awk '{print $1}'):5173${NC}"
+    echo -e "  1. Frontend: ${YELLOW}http://$(hostname -I | awk '{print $1}')${NC}"
     echo -e "  2. API Health: ${YELLOW}curl http://$(hostname -I | awk '{print $1}'):3001/api/health${NC}"
-    echo -e "  3. Login with: ${YELLOW}admin/admin${NC}"
-    echo -e "  4. ${RED}IMPORTANT: Change default passwords for production!${NC}"
+    echo -e "  3. Kea Control: ${YELLOW}http://$(hostname -I | awk '{print $1}'):8000${NC}"
+    echo -e "  4. Login with: ${YELLOW}admin/admin${NC}"
+    echo -e "  5. ${RED}IMPORTANT: Change default passwords for production!${NC}"
     echo ""
     echo -e "${CYAN}🛠️  Service Management:${NC}"
     echo -e "  📊 Check Status: ${YELLOW}sudo systemctl status sagaos-api${NC}"

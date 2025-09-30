@@ -157,8 +157,8 @@ describe('DHCP Schemas', () => {
   describe('validateOptionCodes', () => {
     it('detects duplicate option codes', () => {
       const options = [
-        { code: 43, data: 'test1' },
-        { code: 43, data: 'test2' }
+        { code: 43, data: 'test1', space: 'dhcp4' as const },
+        { code: 43, data: 'test2', space: 'dhcp4' as const }
       ]
 
       const errors = validateOptionCodes(options)
@@ -167,8 +167,8 @@ describe('DHCP Schemas', () => {
 
     it('detects duplicate option names', () => {
       const options = [
-        { name: 'routers', data: '192.168.1.1' },
-        { name: 'routers', data: '192.168.1.2' }
+        { name: 'routers', data: '192.168.1.1', space: 'dhcp4' as const },
+        { name: 'routers', data: '192.168.1.2', space: 'dhcp4' as const }
       ]
 
       const errors = validateOptionCodes(options)
@@ -177,8 +177,8 @@ describe('DHCP Schemas', () => {
 
     it('allows unique options', () => {
       const options = [
-        { name: 'routers', data: '192.168.1.1' },
-        { code: 43, data: 'test' }
+        { name: 'routers', data: '192.168.1.1', space: 'dhcp4' as const },
+        { code: 43, data: 'test', space: 'dhcp4' as const }
       ]
 
       const errors = validateOptionCodes(options)

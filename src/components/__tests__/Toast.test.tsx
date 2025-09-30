@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import Toast from '../Toast'
+import { Toast } from '../Toast'
 
 describe('Toast', () => {
   it('renders toast title and message', () => {
