@@ -369,43 +369,80 @@ For complete security configuration, refer to the Production Security section ab
 
 ### Installation Methods
 
-#### Method 1: Automated Installation (Recommended)
-```bash
-# Clone the repository
-git clone <repository-url>
-cd sagaos-kea-pilot
+#### Method 1: One-Command Installation (Recommended)
 
-# Run the automated installer
+**🐧 Linux Native Installation:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/BlaineHolmes/saga-kea-pilot/main/install.sh | sudo bash
+```
+
+**Alternative - Clone and Install:**
+```bash
+git clone https://github.com/BlaineHolmes/saga-kea-pilot.git
+cd saga-kea-pilot
 sudo ./install.sh
-
-# The installer will:
-# - Install all required dependencies
-# - Configure PostgreSQL database
-# - Setup Kea DHCP with Control Agent
-# - Configure BIND9 DNS (optional)
-# - Create systemd services
-# - Generate initial configuration
-
-# Start the application
-npm run dev
 ```
 
-#### Method 2: Docker Deployment
+**Installation Options:**
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd sagaos-kea-pilot
+# Full installation (default)
+sudo ./install.sh --type full
 
-# Build and start with Docker Compose
-docker-compose up -d
+# Minimal installation (no BIND9)
+sudo ./install.sh --type minimal
 
-# Or use production configuration
-docker-compose -f docker-compose.prod.yml up -d
+# Docker installation
+sudo ./install.sh --type docker
 
-# Access the application
-# Frontend: http://localhost:80
-# API: http://localhost:3001
+# Dry run (preview only)
+sudo ./install.sh --dry-run
 ```
+
+**What gets installed:**
+- ✅ Node.js 18+ and npm
+- ✅ PostgreSQL 16 database
+- ✅ Kea DHCP 2.4+ with Control Agent
+- ✅ BIND9 DNS server (optional)
+- ✅ Nginx reverse proxy
+- ✅ SagaOS web application
+- ✅ Systemd services and auto-start
+
+#### Method 2: Docker Installation
+
+**🐳 Quick Docker Setup:**
+```bash
+git clone https://github.com/BlaineHolmes/saga-kea-pilot.git
+cd saga-kea-pilot
+cp .env.example .env
+sudo docker-compose up -d
+```
+
+**🚀 Production Docker Setup:**
+```bash
+git clone https://github.com/BlaineHolmes/saga-kea-pilot.git
+cd saga-kea-pilot
+sudo docker-compose -f docker-compose.prod.yml up -d
+```
+
+**Docker Management Commands:**
+```bash
+# View logs
+sudo docker-compose logs -f
+
+# Stop services
+sudo docker-compose down
+
+# Restart services
+sudo docker-compose restart
+
+# Scale API Gateway
+sudo docker-compose up -d --scale api-gateway=3
+```
+
+**Access Points:**
+- 🌐 **Frontend**: http://localhost:5173
+- 🔧 **API Gateway**: http://localhost:3001
+- 📊 **Health Check**: http://localhost:3001/api/health
 
 #### Method 3: Manual Installation
 ```bash
@@ -437,9 +474,161 @@ sudo ./scripts/bind9-setup.sh           # BIND9 configuration
 sudo ./scripts/configure-kea-ddns.sh    # Kea DDNS integration
 
 # 8. Start services
-PORT=3001 node api-gateway-simple.cjs &
+PORT=3001 node backend/api-gateway.js &
 npm run dev
 ```
+
+---
+
+### ⚙️ **Configuration Examples**
+
+#### 📝 **Environment Configuration**
+
+**Create your `.env` file:**
+```bash
+cp .env.example .env
+nano .env
+```
+
+**Essential Configuration:**
+```bash
+# Frontend Configuration
+VITE_API_BASE_URL=http://localhost:3001/api
+VITE_WS_URL=ws://localhost:3001/ws
+
+# Backend Configuration
+PORT=3001
+NODE_ENV=development
+
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=kea
+DB_USER=admin
+DB_PASSWORD=admin
+
+# Kea DHCP Configuration
+KEA_CA_URL=http://127.0.0.1:8000
+KEA_CA_USER=admin
+KEA_CA_PASSWORD=admin
+
+# DNS Configuration
+DNS_SERVER=127.0.0.1
+DNS_PORT=53
+DDNS_ENABLED=true
+DDNS_FORWARD_ZONE=lan.sagaos.local
+DDNS_REVERSE_ZONE=0.10.in-addr.arpa
+```
+
+#### 🐳 **Docker Compose Configuration**
+
+**Basic `docker-compose.yml`:**
+```yaml
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:3001/api
+      - VITE_WS_URL=ws://localhost:3001/ws
+    depends_on:
+      - api-gateway
+
+  api-gateway:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    environment:
+      - DB_HOST=postgres
+      - KEA_CA_URL=http://kea-dhcp:8000
+      - DNS_SERVER=bind9
+    depends_on:
+      - postgres
+      - kea-dhcp
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=kea
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/database:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  kea-dhcp:
+    image: jonasal/kea-dhcp4:2.4.1
+    ports:
+      - "67:67/udp"
+      - "8000:8000"
+    volumes:
+      - ./config/kea:/etc/kea
+    cap_add:
+      - NET_ADMIN
+
+  bind9:
+    image: internetsystemsconsortium/bind9:9.19
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    volumes:
+      - ./config/bind9:/etc/bind
+      - bind9_data:/var/lib/bind
+
+volumes:
+  postgres_data:
+  bind9_data:
+```
+
+#### ✅ **Installation Verification**
+
+**Check Service Status:**
+```bash
+# Check systemd services (native installation)
+sudo systemctl status sagaos-api-gateway
+sudo systemctl status postgresql
+sudo systemctl status kea-dhcp4-server
+sudo systemctl status bind9
+
+# Check Docker services
+sudo docker-compose ps
+sudo docker-compose logs api-gateway
+```
+
+**Test API Endpoints:**
+```bash
+# Health check
+curl http://localhost:3001/api/health
+
+# Authentication test
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}'
+
+# DHCP configuration
+curl http://localhost:3001/api/kea/config
+
+# DNS zones
+curl http://localhost:3001/api/dns/zones
+```
+
+**Access Web Interface:**
+- 🌐 **Frontend**: http://localhost:5173
+- 🔧 **API Documentation**: http://localhost:3001/api/health
+- 📊 **Login**: admin/admin (⚠️ **Change for production!**)
+
+#### 🔧 **Post-Installation Steps**
+
+1. **Change Default Credentials** (Important!)
+2. **Configure Firewall Rules**
+3. **Setup SSL/TLS Certificates**
+4. **Configure Backup Strategy**
+5. **Review Security Settings**
 
 ### Environment Configuration
 
